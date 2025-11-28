@@ -553,13 +553,15 @@ alter publication supabase_realtime add table messages;`}
                 
                 const fetchMessages = async (isPolling = false) => {
                     if (!isPolling) setLoadingMessages(true);
-                    
                     const { data, error } = await supabase
-                        .from('messages')
-                        .select('*')
-                        .or(`and(sender_id.eq.${user.user_id},receiver_id.eq.${activeContact.user_id}),and(sender_id.eq.${activeContact.user_id},receiver_id.eq.${user.user_id})`)
-                        .order('created_at', { ascending: true });
-                    
+  .from('messages')
+  .select('*')
+  .or(
+    `and(sender_id.eq.${user.user_id},receiver_id.eq.${activeContact.user_id})`,
+    `and(sender_id.eq.${activeContact.user_id},receiver_id.eq.${user.user_id})`
+  )
+  .order('created_at', { ascending: true });
+
                     if (data) {
                         // Only update state if data changed (simple length check or deep compare)
                         setMessages(prev => {
