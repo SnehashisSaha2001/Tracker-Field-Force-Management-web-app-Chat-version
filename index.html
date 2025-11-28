@@ -745,15 +745,10 @@ alter publication supabase_realtime add table messages;
                     if (user.password !== form.password) throw new Error('Incorrect password.');
                     if (user.mobile_no !== form.mobile) throw new Error('Incorrect mobile number.');
 
-                    // --- CRITICAL FIX: SYNC USER TO SUPABASE ---
-                    // This ensures the user exists in the DB 'users' table to satisfy Foreign Key constraints
-                    // when inserting into 'daily_activity'.
-                    try {
-                       await ensureSupabaseUser(user);
-                    } catch (syncErr) {
-                        console.warn("Background Sync Failed:", syncErr);
-                    }
-
+                    // --- LOCAL AUTH SUCCESS ---
+                    // We remove Supabase Sync here to ensure Login is purely local as requested.
+                    // Syncing will happen in the App component after login.
+                    
                     // Simulate slight delay for UX
                     await new Promise(resolve => setTimeout(resolve, 300));
 
@@ -1599,6 +1594,12 @@ alter publication supabase_realtime add table messages;
             // Heartbeat System for Online Status
             useEffect(() => {
                 if (!user) return;
+                
+                // --- BACKGROUND SYNC ON LOGIN ---
+                // We sync the user to Supabase here (instead of Login Screen)
+                // so that Chat and Activity tables have a valid foreign key to reference.
+                // This does not block the UI.
+                ensureSupabaseUser(user).catch(err => console.warn("Background sync error:", err));
                 
                 const sendHeartbeat = async () => {
                     await supabase.from('users').update({ 
