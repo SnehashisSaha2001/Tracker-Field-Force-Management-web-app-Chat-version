@@ -78,7 +78,6 @@
         /* Map Styling */
         .leaflet-container { background: #1e293b; font-family: 'Inter', sans-serif; }
         .map-tiles-inverted { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(85%); }
-        /* Ensure map markers and popups are NOT inverted */
         .leaflet-marker-icon, .leaflet-popup, .leaflet-tooltip, .leaflet-pane { filter: invert(0%) !important; }
 
         /* Custom Scrollbar for Webkit */
@@ -133,7 +132,7 @@
             border-bottom: 1px solid #334155;
             color: #cbd5e1;
             background-color: transparent;
-            font-size: 0.875rem; /* Better readability */
+            font-size: 0.875rem;
         }
         .modern-table tr:hover td { background-color: rgba(30, 41, 59, 0.5); }
 
@@ -1201,8 +1200,16 @@
                 ),
 
                 // Main Content Area
-                React.createElement("main", { className: "flex-1 overflow-y-auto relative z-10 custom-scrollbar bg-primary" },
-                    React.createElement("div", { className: "p-4 lg:p-8 max-w-7xl mx-auto min-h-full" },
+                React.createElement("main", { className: "flex-1 overflow-hidden relative z-10 custom-scrollbar bg-primary flex flex-col" },
+                    // FIX: The wrapper div now switches logic based on section
+                    React.createElement("div", { 
+                        className: `
+                            max-w-7xl mx-auto w-full
+                            ${section === 'chat' 
+                                ? 'h-full !p-0 flex flex-col' // FIX: For Chat, enforce full height and remove padding so input bar sticks to bottom
+                                : 'p-4 lg:p-8 min-h-full overflow-y-auto' // For other pages, allow normal scrolling with padding
+                            }`
+                    },
                         section === 'dashboard' && React.createElement(Dashboard, { user }),
                         section === 'activity' && React.createElement(DailyActivity, { user, allEmployees: employeeList }),
                         section === 'tasks' && React.createElement(TaskManagement, { user, allEmployees: employeeList }),
