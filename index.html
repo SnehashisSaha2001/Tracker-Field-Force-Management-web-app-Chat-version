@@ -5,9 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Tracker Field Force | Modern</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
-    <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <!-- Leaflet Control Geocoder CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -73,7 +71,7 @@
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #00d1ff; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #00d1ff; }
 
         /* Form Elements */
         .modern-input {
@@ -173,6 +171,7 @@
             ChevronLeft: () => React.createElement("svg", { className: "w-6 h-6", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" }, React.createElement("path", { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M15 19l-7-7 7-7" })),
             Edit: () => React.createElement("svg", { className: "w-4 h-4", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" }, React.createElement("path", { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" })),
             Delete: () => React.createElement("svg", { className: "w-4 h-4", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" }, React.createElement("path", { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" })),
+            PaperClip: () => React.createElement("svg", { className: "w-5 h-5", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" }, React.createElement("path", { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" })),
         };
 
         const Modal = ({ isOpen, onClose, title, children }) => {
@@ -299,6 +298,10 @@
                     if (data.password !== form.password) throw new Error('Incorrect Password');
                     if (data.mobile_no !== form.mobile) throw new Error('Incorrect Mobile Number');
                     if (data.role !== form.role) throw new Error('Unauthorized Role');
+                    
+                    // Update Online Status
+                    await supabase.from('user_profiles').update({ is_online: true, last_sync: new Date().toISOString() }).eq('user_id', data.user_id);
+                    
                     onLogin(data);
                 } catch (err) { setError(err.message || 'Login failed'); } finally { setLoading(false); }
             };
@@ -426,6 +429,14 @@
 
             const handleAction = async (type) => {
                 if (!currentLoc) return alert("Waiting for accurate GPS...");
+                
+                // Update tracking status
+                if (type === 'checkin') {
+                   await supabase.from('user_profiles').update({ is_tracking_active: true }).eq('user_id', user.user_id);
+                } else if (type === 'checkout') {
+                   await supabase.from('user_profiles').update({ is_tracking_active: false }).eq('user_id', user.user_id);
+                }
+
                 const { data, error } = await supabase.from('daily_activity').insert([{ 
                     user_id: user.user_id, 
                     type, 
@@ -718,10 +729,17 @@
             const [inputText, setInputText] = useState('');
             const [searchTerm, setSearchTerm] = useState('');
             const [contactList, setContactList] = useState([]);
-            const [view, setView] = useState('list'); // 'list' or 'chat'
-            const scrollRef = useRef(null);
+            const [view, setView] = useState('list');
+            const [showScrollDownBtn, setShowScrollDownBtn] = useState(false);
+            const [selectedFile, setSelectedFile] = useState(null);
+            const [uploading, setUploading] = useState(false);
+            const [errorConfig, setErrorConfig] = useState(null);
 
-            // Simple mobile breakpoint check
+            const scrollRef = useRef(null);
+            const chatContainerRef = useRef(null);
+            const shouldAutoScroll = useRef(true);
+            const fileInputRef = useRef(null);
+
             const isMobile = window.innerWidth < 1024;
 
             const fetchSidebarData = useCallback(async () => {
@@ -751,21 +769,135 @@
 
             useEffect(() => { fetchSidebarData(); const itv = setInterval(fetchSidebarData, 10000); return () => clearInterval(itv); }, [fetchSidebarData]);
             useEffect(() => { if (activeContact) { fetchMessages(); const itv = setInterval(fetchMessages, 5000); return () => clearInterval(itv); } }, [activeContact, fetchMessages]);
-            useEffect(() => { if (scrollRef.current) scrollRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages]);
+            
+            useEffect(() => { 
+                if (shouldAutoScroll.current && scrollRef.current) {
+                    scrollRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' }); 
+                }
+            }, [messages]);
 
-            const selectContact = (u) => { setActiveContact(u); if (isMobile) setView('chat'); };
+            const handleScroll = () => {
+                if (!chatContainerRef.current) return;
+                const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
+                const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+                const isNearBottom = distanceFromBottom < 120;
+                shouldAutoScroll.current = isNearBottom;
+                setShowScrollDownBtn(!isNearBottom);
+            };
+
+            const scrollToBottom = () => {
+                shouldAutoScroll.current = true;
+                scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
+                setShowScrollDownBtn(false);
+            };
+
+            const selectContact = (u) => { 
+                setActiveContact(u); 
+                shouldAutoScroll.current = true; 
+                if (isMobile) setView('chat'); 
+            };
+            
             const backToList = () => { setActiveContact(null); setView('list'); fetchSidebarData(); };
 
             const handleSend = async (e) => {
-                e.preventDefault(); if (!inputText.trim() || !activeContact) return;
-                const msgText = inputText.trim();
-                setInputText('');
-                const { error } = await supabase.from('chat_messages').insert([{ sender_id: user.user_id, receiver_id: activeContact.user_id, message: msgText }]);
-                if (!error) { fetchMessages(); fetchSidebarData(); }
+                e.preventDefault(); 
+                if ((!inputText.trim() && !selectedFile) || !activeContact) return;
+                
+                setUploading(true);
+                setErrorConfig(null);
+                let filePayload = {};
+                
+                try {
+                    if (selectedFile) {
+                        // 1. Sanitize file name robustly
+                        const fileExt = selectedFile.name.split('.').pop();
+                        const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
+                        const filePath = `${user.user_id}/${fileName}`;
+                        
+                        // 2. Upload to Storage
+                        const { data, error: uploadError } = await supabase.storage
+                            .from('chat-uploads')
+                            .upload(filePath, selectedFile, {
+                                cacheControl: '3600',
+                                upsert: false
+                            });
+                        
+                        if (uploadError) {
+                            throw new Error(`Storage Error: ${uploadError.message}`);
+                        }
+
+                        // 3. Get Public URL
+                        const { data: { publicUrl } } = supabase.storage
+                            .from('chat-uploads')
+                            .getPublicUrl(filePath);
+                        
+                        let fileType = 'image';
+                        if (selectedFile.type.includes('pdf')) fileType = 'pdf';
+
+                        filePayload = {
+                            file_url: publicUrl,
+                            file_type: fileType,
+                            mime_type: selectedFile.type,
+                            file_size_kb: Math.round(selectedFile.size / 1024)
+                        };
+                    }
+
+                    // 4. Insert Message to Database
+                    const msgText = inputText.trim();
+                    const { error: dbError } = await supabase.from('chat_messages').insert([{
+                        sender_id: user.user_id, 
+                        receiver_id: activeContact.user_id, 
+                        message: msgText,
+                        ...filePayload
+                    }]);
+
+                    if (dbError) throw new Error(`Database Error: ${dbError.message}`);
+
+                    // Success Cleanup
+                    setInputText('');
+                    setSelectedFile(null);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                    fetchMessages(); 
+                    fetchSidebarData(); 
+                    shouldAutoScroll.current = true;
+
+                } catch (err) {
+                    console.error("Full error:", err);
+                    const msg = err.message;
+                    // Detect RLS error specifically
+                    const isRLS = msg.includes('row-level security') || msg.includes('new row violates');
+                    
+                    if (isRLS && msg.includes('Storage Error')) {
+                        setErrorConfig({
+                            title: "Storage Permission Denied",
+                            desc: "Your Supabase storage bucket 'chat-uploads' exists but blocks uploads. Run this SQL to fix it:",
+                            sql: "create policy \"Allow Public Uploads\" on storage.objects for insert to public with check ( bucket_id = 'chat-uploads' );"
+                        });
+                    } else if (isRLS && msg.includes('Database Error')) {
+                        setErrorConfig({
+                            title: "Database Permission Denied",
+                            desc: "The 'chat_messages' table is blocking inserts. Since you aren't using Supabase Auth, you need to allow public/anon access:",
+                            sql: "create policy \"Allow Public Insert\" on public.chat_messages for insert to public with check (true);"
+                        });
+                    } else {
+                        alert(msg);
+                    }
+                } finally {
+                    setUploading(false);
+                }
+            };
+            
+            const handleFileSelect = (e) => {
+                const file = e.target.files[0];
+                if (file) setSelectedFile(file);
             };
 
-            return React.createElement("div", { className: "flex flex-col lg:flex-row h-[calc(100vh-8rem)] bg-[#111b21] rounded-2xl overflow-hidden border border-white/5 shadow-2xl" },
-                // Sidebar (List)
+            const clearSelectedFile = () => {
+                setSelectedFile(null);
+                if (fileInputRef.current) fileInputRef.current.value = '';
+            };
+
+            return React.createElement("div", { className: "flex flex-col lg:flex-row h-[calc(100vh-8rem)] bg-[#111b21] rounded-2xl overflow-hidden border border-white/5 shadow-2xl relative" },
                 React.createElement("div", { className: `${isMobile && view === 'chat' ? 'hidden' : 'flex'} w-full lg:w-[350px] flex-col bg-[#111b21] border-r border-white/10` },
                     React.createElement("div", { className: "p-4 bg-[#202c33] flex items-center justify-between shrink-0" },
                         React.createElement("span", { className: "font-bold text-gray-200" }, "Chats"),
@@ -785,23 +917,30 @@
                         ))
                     )
                 ),
-                // Chat Window
                 React.createElement("div", { className: `${isMobile && view === 'list' ? 'hidden' : 'flex'} flex-1 flex flex-col bg-[#0b141a] relative` },
                     !activeContact ? React.createElement("div", { className: "flex-1 flex flex-col items-center justify-center p-6 text-center" },
                         React.createElement("div", { className: "p-6 bg-accent/5 rounded-full mb-6 text-accent opacity-20" }, React.createElement(Icons.Chat, null)),
                         React.createElement("h2", { className: "text-xl font-light text-gray-300" }, "Select a chat"),
                         React.createElement("p", { className: "text-gray-500 text-xs mt-2" }, "to start messaging")
                     ) : React.createElement(React.Fragment, null,
-                        React.createElement("div", { className: "p-3 px-4 bg-[#202c33] flex items-center gap-3 border-l border-white/5 z-10 shrink-0" },
+                        React.createElement("div", { className: "p-3 px-4 bg-[#202c33] flex items-center gap-3 border-l border-white/5 z-10 shrink-0 shadow-md" },
                             isMobile && React.createElement("button", { onClick: backToList, className: "text-gray-400 p-1 mr-1" }, React.createElement(Icons.ChevronLeft, null)),
                             React.createElement("img", { src: activeContact.photo_url || `https://picsum.photos/seed/${activeContact.user_id}/40/40`, className: "w-8 h-8 rounded-full" }),
-                            React.createElement("div", null, React.createElement("h4", { className: "font-semibold text-white text-sm leading-tight" }, activeContact.name), React.createElement("p", { className: "text-[9px] text-success" }, "online"))
+                            React.createElement("div", null, React.createElement("h4", { className: "font-semibold text-white text-sm leading-tight" }, activeContact.name), React.createElement("p", { className: "text-[9px] text-success" }, activeContact.is_online ? "online" : "offline"))
                         ),
-                        React.createElement("div", { className: "flex-1 overflow-y-auto p-3 sm:p-4 space-y-2 custom-scrollbar bg-[#0b141a]" },
+                        
+                        React.createElement("div", { 
+                            ref: chatContainerRef, 
+                            onScroll: handleScroll,
+                            className: "flex-1 overflow-y-auto p-3 sm:p-4 space-y-2 custom-scrollbar bg-[#0b141a] relative overscroll-y-contain",
+                            style: { WebkitOverflowScrolling: 'touch' } 
+                        },
                             messages.map(m => {
                                 const isMe = m.sender_id === user.user_id;
                                 return React.createElement("div", { key: m.id, className: `flex w-full ${isMe ? 'justify-end' : 'justify-start'}` },
                                     React.createElement("div", { className: `max-w-[85%] sm:max-w-[70%] p-2.5 rounded-xl text-sm shadow-sm relative ${isMe ? 'bg-[#005c4b] text-white rounded-tr-none bubble-me' : 'bg-[#202c33] text-white rounded-tl-none bubble-them'}` },
+                                        m.file_url && m.file_type === 'image' && React.createElement("img", { src: m.file_url, className: "rounded-lg mb-2 max-w-full h-auto border border-white/10" }),
+                                        m.file_url && m.file_type === 'pdf' && React.createElement("a", { href: m.file_url, target: "_blank", className: "flex items-center gap-2 bg-black/20 p-2 rounded hover:bg-black/30 transition-colors mb-2 text-accent text-xs font-bold uppercase" }, React.createElement(Icons.PaperClip, null), " View PDF"),
                                         m.message && React.createElement("p", { className: "px-1 pr-8 whitespace-pre-wrap break-words text-sm leading-relaxed" }, m.message),
                                         React.createElement("div", { className: "flex justify-end items-center gap-1 mt-1 text-[8px] opacity-60 absolute bottom-1 right-2" }, React.createElement("span", null, new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })), isMe && React.createElement(Icons.DoubleCheck, null))
                                     )
@@ -809,10 +948,57 @@
                             }),
                             React.createElement("div", { ref: scrollRef, className: "h-2" })
                         ),
-                        React.createElement("div", { className: "p-2 sm:p-3 bg-[#202c33] flex items-center gap-2 shrink-0" },
-                            React.createElement("form", { onSubmit: handleSend, className: "flex-1 flex gap-2" },
-                                React.createElement("input", { value: inputText, onChange: e => setInputText(e.target.value), className: "flex-1 bg-[#2a3942] px-4 py-2.5 rounded-full text-white text-sm outline-none", placeholder: "Type a message" }),
-                                React.createElement("button", { type: "submit", disabled: !inputText.trim(), className: `p-2.5 rounded-full transition-all ${inputText.trim() ? 'bg-accent text-brandNav' : 'bg-tertiary text-gray-400'}` }, React.createElement(Icons.Send, null))
+
+                        showScrollDownBtn && React.createElement("button", { 
+                            onClick: scrollToBottom, 
+                            className: "absolute bottom-20 right-6 z-20 bg-[#202c33] text-accent p-3 rounded-full shadow-lg border border-white/10 hover:bg-[#2a3942] transition-all animate-bounce opacity-90 hover:opacity-100"
+                        }, React.createElement("svg", { className: "w-5 h-5", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" }, React.createElement("path", { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M19 14l-7 7m0 0l-7-7m7 7V3" }))),
+                        
+                        // --- Permission Error Alert UI ---
+                        errorConfig && React.createElement("div", { className: "absolute bottom-20 left-4 right-4 lg:left-10 lg:right-10 bg-secondary border border-danger p-4 rounded-xl shadow-2xl z-50 flex flex-col gap-2 animate-slide-in" },
+                            React.createElement("div", { className: "flex justify-between items-start" },
+                                React.createElement("h4", { className: "text-danger font-bold flex items-center gap-2 text-sm" },
+                                    React.createElement(Icons.Close, { className: "w-4 h-4" }), " ", errorConfig.title
+                                ),
+                                React.createElement("button", { onClick: () => setErrorConfig(null), className: "text-gray-400 hover:text-white" }, React.createElement(Icons.Close))
+                            ),
+                            React.createElement("p", { className: "text-xs text-gray-300" }, errorConfig.desc),
+                            React.createElement("div", { className: "bg-black/50 p-2 rounded text-[10px] font-mono text-success overflow-x-auto whitespace-nowrap" },
+                                errorConfig.sql
+                            ),
+                            React.createElement("button", { 
+                                onClick: () => { 
+                                    navigator.clipboard.writeText(errorConfig.sql); 
+                                    alert('SQL copied to clipboard!'); 
+                                }, 
+                                className: "self-start text-[10px] bg-white/10 hover:bg-white/20 py-1.5 px-3 rounded text-center font-bold uppercase tracking-wider transition-colors" 
+                            }, "Copy SQL Code")
+                        ),
+
+                        React.createElement("div", { className: "p-2 sm:p-3 bg-[#202c33] flex items-center gap-2 shrink-0 z-30" },
+                            React.createElement("input", { type: "file", ref: fileInputRef, onChange: handleFileSelect, onClick: (e) => e.target.value = null, className: "hidden", accept: "image/*,application/pdf" }),
+                            React.createElement("button", { 
+                                type: "button", 
+                                onClick: () => fileInputRef.current.click(), 
+                                className: `p-2.5 rounded-full transition-all ${selectedFile ? 'bg-accent text-brandNav' : 'bg-[#2a3942] text-gray-400 hover:text-white hover:bg-[#3a4b55]'}`
+                            }, React.createElement(Icons.PaperClip, null)),
+                            
+                            React.createElement("form", { onSubmit: handleSend, className: "flex-1 flex gap-2 relative" },
+                                selectedFile && React.createElement("div", { className: "absolute -top-12 left-0 bg-[#202c33] border border-accent/30 text-accent text-xs px-3 py-1.5 rounded-lg shadow-lg flex items-center gap-2 animate-slide-in" },
+                                    React.createElement("span", { className: "max-w-[200px] truncate" }, selectedFile.name),
+                                    React.createElement("button", { type: "button", onClick: clearSelectedFile, className: "hover:text-white" }, React.createElement(Icons.Close, null))
+                                ),
+                                React.createElement("input", { 
+                                    value: inputText, 
+                                    onChange: e => setInputText(e.target.value), 
+                                    className: "flex-1 bg-[#2a3942] px-4 py-2.5 rounded-full text-white text-sm outline-none", 
+                                    placeholder: "Type a message"
+                                }),
+                                React.createElement("button", { 
+                                    type: "submit", 
+                                    disabled: (!inputText.trim() && !selectedFile) || uploading, 
+                                    className: `p-2.5 rounded-full transition-all ${inputText.trim() || selectedFile ? 'bg-accent text-brandNav' : 'bg-tertiary text-gray-400'}` 
+                                }, uploading ? '...' : React.createElement(Icons.Send, null))
                             )
                         )
                     )
@@ -839,7 +1025,8 @@
                 e.preventDefault();
                 if (!formData.title || !formData.assigned_to) return alert("Fill required fields.");
                 setLoading(true);
-                const { error } = await supabase.from('tasks').insert([{ ...formData, assigned_by: user.user_id, status: 'pending', created_at: new Date().toISOString() }]);
+                // FIX: Added message_type: 'task' because it's required by the schema
+                const { error } = await supabase.from('tasks').insert([{ ...formData, assigned_by: user.user_id, status: 'pending', message_type: 'task', created_at: new Date().toISOString() }]);
                 if (error) alert(error.message);
                 else { setShowModal(false); setFormData({ title: '', description: '', priority: 'medium', assigned_to: '' }); fetchTasks(); }
                 setLoading(false);
@@ -955,7 +1142,12 @@
             useEffect(() => { if (user) fetchEmployees(); }, [user, fetchEmployees]);
 
             const navigate = (id) => { setSection(id); setMobileNavOpen(false); window.scrollTo(0,0); };
-            const logout = () => { setUser(null); localStorage.removeItem('current_user_session'); };
+            
+            const logout = async () => { 
+                if (user) await supabase.from('user_profiles').update({ is_online: false }).eq('user_id', user.user_id);
+                setUser(null); 
+                localStorage.removeItem('current_user_session'); 
+            };
 
             if (!user) return React.createElement(Login, { onLogin: u => { setUser(u); localStorage.setItem('current_user_session', JSON.stringify(u)); } });
 
