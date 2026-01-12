@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -180,6 +181,19 @@
         const SUPABASE_URL = 'https://yuuzmvjkxzwmisvxkbpk.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl1dXptdmpreHp3bWlzdnhrYnBrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQyOTE4NDAsImV4cCI6MjA3OTg2Nzg0MH0.bDwJTetMoOJIh0rNuvWADtD_5VLLfW0uaPijv8Zo6O0';
         const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        // --- UTILS ---
+        // // ADD: Utility for reverse geocoding to prevent "Locating" placeholder issues
+        const reverseGeocode = async (lat, lng) => {
+            try {
+                const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`);
+                const data = await response.json();
+                return data.display_name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+            } catch (err) {
+                console.error("Geocoding failed:", err);
+                return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+            }
+        };
 
         // --- ICONS (SVG) ---
         const Icons = {
@@ -449,9 +463,17 @@
                 return () => { if (watchId.current) navigator.geolocation.clearWatch(watchId.current); };
             }, []);
 
+            // // MODIFY: handleAction updated to prevent "Locating" from being permanently stored
             const handleAction = async (type) => {
                 if (!currentLoc) return alert("Waiting for accurate GPS...");
                 
+                // // ADD: Async address verification before storage
+                let finalLocation = displayAddress;
+                if (finalLocation === 'Locating...') {
+                    finalLocation = await reverseGeocode(currentLoc.lat, currentLoc.lng);
+                    setDisplayAddress(finalLocation);
+                }
+
                 if (type === 'checkin') {
                    await supabase.from('user_profiles').update({ is_tracking_active: true }).eq('user_id', user.user_id);
                 } else if (type === 'checkout') {
@@ -463,7 +485,7 @@
                     type, 
                     latitude: currentLoc.lat, 
                     longitude: currentLoc.lng, 
-                    location: displayAddress, 
+                    location: finalLocation, // // MODIFY: Use verified address
                     created_at: new Date().toISOString() 
                 }]).select();
                 
@@ -483,12 +505,20 @@
 
             const submitVisit = async () => {
                 if (!visitData.client) return alert("Client name required");
+                
+                // // ADD: Ensure address is resolved before visit log
+                let finalLocation = displayAddress;
+                if (finalLocation === 'Locating...') {
+                    finalLocation = await reverseGeocode(currentLoc.lat, currentLoc.lng);
+                    setDisplayAddress(finalLocation);
+                }
+
                 const { error } = await supabase.from('daily_activity').insert([{
                     user_id: user.user_id,
                     type: 'visit',
                     latitude: currentLoc.lat,
                     longitude: currentLoc.lng,
-                    location: displayAddress,
+                    location: finalLocation, // // MODIFY: Use verified address
                     description: `Client: ${visitData.client}`,
                     details: visitData.purpose,
                     created_at: new Date().toISOString()
@@ -910,8 +940,9 @@
                 if (fileInputRef.current) fileInputRef.current.value = '';
             };
 
+            // // MODIFY: Chat container hierarchy optimized for mobile keyboard handling
             return React.createElement("div", { className: "flex flex-col lg:flex-row h-full bg-[#111b21] rounded-2xl overflow-hidden border border-white/5 shadow-2xl relative" },
-                React.createElement("div", { className: `${isMobile && view === 'chat' ? 'hidden' : 'flex'} w-full lg:w-[350px] flex-col bg-[#111b21] border-r border-white/10` },
+                React.createElement("div", { className: `${isMobile && view === 'chat' ? 'hidden' : 'flex'} w-full lg:w-[350px] flex-col bg-[#111b21] border-r border-white/10 shrink-0` },
                     React.createElement("div", { className: "p-4 bg-[#202c33] flex items-center justify-between shrink-0" },
                         React.createElement("span", { className: "font-bold text-gray-200" }, "Chats"),
                         React.createElement(Icons.Users, null)
@@ -930,7 +961,7 @@
                         ))
                     )
                 ),
-                React.createElement("div", { className: `${isMobile && view === 'list' ? 'hidden' : 'flex'} flex-1 flex flex-col bg-[#0b141a] relative` },
+                React.createElement("div", { className: `${isMobile && view === 'list' ? 'hidden' : 'flex'} flex-1 flex flex-col bg-[#0b141a] relative min-h-0` },
                     !activeContact ? React.createElement("div", { className: "flex-1 flex flex-col items-center justify-center p-6 text-center" },
                         React.createElement("div", { className: "p-6 bg-accent/5 rounded-full mb-6 text-accent opacity-20" }, React.createElement(Icons.Chat, null)),
                         React.createElement("h2", { className: "text-xl font-light text-gray-300" }, "Select a chat"),
@@ -942,10 +973,11 @@
                             React.createElement("div", null, React.createElement("h4", { className: "font-semibold text-white text-sm leading-tight" }, activeContact.name), React.createElement("p", { className: "text-[9px] text-success" }, activeContact.is_online ? "online" : "offline"))
                         ),
                         
+                        // // MODIFY: Message list container uses flex-1 min-h-0 to scroll correctly independently of input bar
                         React.createElement("div", { 
                             ref: chatContainerRef, 
                             onScroll: handleScroll,
-                            className: "flex-1 overflow-y-auto p-3 sm:p-4 space-y-2 custom-scrollbar bg-[#0b141a] relative overscroll-y-contain",
+                            className: "flex-1 overflow-y-auto p-3 sm:p-4 space-y-2 custom-scrollbar bg-[#0b141a] relative overscroll-y-contain min-h-0",
                             style: { WebkitOverflowScrolling: 'touch' } 
                         },
                             messages.map(m => {
@@ -987,12 +1019,13 @@
                             }, "Copy SQL Code")
                         ),
 
-                        React.createElement("div", { className: "p-2 sm:p-3 bg-[#202c33] flex items-center gap-2 shrink-0 z-30 safe-bottom" },
+                        // // MODIFY: Chat bar fixed to bottom via flex layout with safe-bottom padding
+                        React.createElement("div", { className: "p-2 sm:p-3 bg-[#202c33] flex items-center gap-2 shrink-0 z-30 safe-bottom border-t border-white/5" },
                             React.createElement("input", { type: "file", ref: fileInputRef, onChange: handleFileSelect, onClick: (e) => e.target.value = null, className: "hidden", accept: "image/*,application/pdf" }),
                             React.createElement("button", { 
                                 type: "button", 
                                 onClick: () => fileInputRef.current.click(), 
-                                className: `p-2.5 rounded-full transition-all ${selectedFile ? 'bg-accent text-brandNav' : 'bg-[#2a3942] text-gray-400 hover:text-white hover:bg-[#3a4b55]'}`
+                                className: `p-2.5 rounded-full transition-all shrink-0 ${selectedFile ? 'bg-accent text-brandNav' : 'bg-[#2a3942] text-gray-400 hover:text-white hover:bg-[#3a4b55]'}`
                             }, React.createElement(Icons.PaperClip, null)),
                             
                             React.createElement("form", { onSubmit: handleSend, className: "flex-1 flex gap-2 relative" },
@@ -1009,7 +1042,7 @@
                                 React.createElement("button", { 
                                     type: "submit", 
                                     disabled: (!inputText.trim() && !selectedFile) || uploading, 
-                                    className: `p-2.5 rounded-full transition-all ${inputText.trim() || selectedFile ? 'bg-accent text-brandNav' : 'bg-tertiary text-gray-400'}` 
+                                    className: `p-2.5 rounded-full transition-all shrink-0 ${inputText.trim() || selectedFile ? 'bg-accent text-brandNav' : 'bg-tertiary text-gray-400'}` 
                                 }, uploading ? '...' : React.createElement(Icons.Send, null))
                             )
                         )
@@ -1166,6 +1199,7 @@
                 React.createElement(Icon, null), React.createElement("span", { className: "text-sm tracking-tight" }, label)
             );
 
+            // // MODIFY: Layout wrapper updated to ensure flex-1 overflow hidden and h-full for chat mode
             return React.createElement("div", { className: "flex flex-col lg:flex-row h-full bg-primary text-slate-200 overflow-hidden" },
                 // Mobile Header
                 React.createElement("header", { className: "lg:hidden bg-brandNav p-4 flex justify-between items-center border-b border-white/5 z-30 shrink-0 h-16" },
@@ -1200,14 +1234,14 @@
                 ),
 
                 // Main Content Area
-                React.createElement("main", { className: "flex-1 overflow-hidden relative z-10 custom-scrollbar bg-primary flex flex-col" },
-                    // FIX: The wrapper div now switches logic based on section
+                React.createElement("main", { className: "flex-1 overflow-hidden relative z-10 custom-scrollbar bg-primary flex flex-col min-h-0" },
+                    // // MODIFY: For chat, ensure the wrapper takes full dynamic height and stays unpadded for sticky input
                     React.createElement("div", { 
                         className: `
-                            max-w-7xl mx-auto w-full
+                            max-w-7xl mx-auto w-full flex-1 min-h-0
                             ${section === 'chat' 
-                                ? 'h-full !p-0 flex flex-col' // FIX: For Chat, enforce full height and remove padding so input bar sticks to bottom
-                                : 'p-4 lg:p-8 min-h-full overflow-y-auto' // For other pages, allow normal scrolling with padding
+                                ? 'h-full !p-0 flex flex-col overflow-hidden' 
+                                : 'p-4 lg:p-8 overflow-y-auto'
                             }`
                     },
                         section === 'dashboard' && React.createElement(Dashboard, { user }),
