@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -63,12 +62,13 @@
         html, body { 
             margin: 0; 
             padding: 0; 
-            /* Use dvh (dynamic viewport height) for mobile browsers to handle address bars */
-            height: 100dvh; 
+            /* FIXED: Changed height to min-height and overflow: hidden to overflow-y: auto */
+            min-height: 100dvh; 
             width: 100%; 
             background-color: #0f172a; 
             color: #f8fafc; 
-            overflow: hidden; /* Prevent body scroll, handle internally */
+            overflow-y: auto;
+            overflow-x: hidden;
             -webkit-tap-highlight-color: transparent; 
             font-family: 'Inter', sans-serif;
             box-sizing: border-box;
@@ -183,7 +183,6 @@
         const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
         // --- UTILS ---
-        // // ADD: Utility for reverse geocoding to prevent "Locating" placeholder issues
         const reverseGeocode = async (lat, lng) => {
             try {
                 const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`);
@@ -303,7 +302,6 @@
                 }
             }, [lat, lng, pathCoordinates, currentAddress, active]);
 
-            // Explicit responsive heights for map container
             return React.createElement("div", { ref: mapRef, className: "w-full h-[40vh] lg:h-[500px] rounded-2xl overflow-hidden shadow-inner border border-tertiary relative z-0 bg-secondary" });
         };
 
@@ -344,7 +342,8 @@
                 } catch (err) { setError(err.message || 'Login failed'); } finally { setLoading(false); }
             };
 
-            return React.createElement("div", { className: "flex flex-col lg:flex-row h-full w-full font-sans bg-brandMain overflow-hidden" },
+            // FIXED: Removed h-full and overflow-hidden, added min-h-screen
+            return React.createElement("div", { className: "flex flex-col lg:flex-row min-h-screen w-full font-sans bg-brandMain" },
                 React.createElement("div", { className: "hidden lg:flex w-[350px] xl:w-[400px] bg-brandNav flex-col items-center justify-center p-8 border-r border-[#1a3a5a] relative z-10 shrink-0" },
                     React.createElement("div", { className: "flex flex-col items-center mb-auto mt-12" },
                         React.createElement("div", { className: "w-32 h-32 rounded-full border-2 border-accent p-1.5 mb-8 flex items-center justify-center shadow-[0_0_30px_rgba(0,209,255,0.1)]" },
@@ -357,7 +356,7 @@
                     ),
                     React.createElement("div", { className: "mt-auto mb-12 text-center opacity-50 text-sm text-gray-400" }, "v2.0.4 Stable Build")
                 ),
-                React.createElement("div", { className: "flex-1 bg-brandMain flex flex-col justify-center items-center p-4 lg:p-12 overflow-y-auto relative" },
+                React.createElement("div", { className: "flex-1 bg-brandMain flex flex-col justify-center items-center p-4 lg:p-12 relative" },
                     React.createElement("div", { className: "w-full max-w-md" },
                         React.createElement("div", { className: "mb-8 lg:hidden flex flex-col items-center" },
                            React.createElement("div", { className: "w-16 h-16 rounded-full border border-accent p-1 mb-4 flex items-center justify-center bg-brandNav" }, React.createElement(Icons.Rocket, null)),
@@ -463,11 +462,9 @@
                 return () => { if (watchId.current) navigator.geolocation.clearWatch(watchId.current); };
             }, []);
 
-            // // MODIFY: handleAction updated to prevent "Locating" from being permanently stored
             const handleAction = async (type) => {
                 if (!currentLoc) return alert("Waiting for accurate GPS...");
                 
-                // // ADD: Async address verification before storage
                 let finalLocation = displayAddress;
                 if (finalLocation === 'Locating...') {
                     finalLocation = await reverseGeocode(currentLoc.lat, currentLoc.lng);
@@ -485,7 +482,7 @@
                     type, 
                     latitude: currentLoc.lat, 
                     longitude: currentLoc.lng, 
-                    location: finalLocation, // // MODIFY: Use verified address
+                    location: finalLocation,
                     created_at: new Date().toISOString() 
                 }]).select();
                 
@@ -506,7 +503,6 @@
             const submitVisit = async () => {
                 if (!visitData.client) return alert("Client name required");
                 
-                // // ADD: Ensure address is resolved before visit log
                 let finalLocation = displayAddress;
                 if (finalLocation === 'Locating...') {
                     finalLocation = await reverseGeocode(currentLoc.lat, currentLoc.lng);
@@ -518,7 +514,7 @@
                     type: 'visit',
                     latitude: currentLoc.lat,
                     longitude: currentLoc.lng,
-                    location: finalLocation, // // MODIFY: Use verified address
+                    location: finalLocation,
                     description: `Client: ${visitData.client}`,
                     details: visitData.purpose,
                     created_at: new Date().toISOString()
@@ -940,7 +936,6 @@
                 if (fileInputRef.current) fileInputRef.current.value = '';
             };
 
-            // // MODIFY: Chat container hierarchy optimized for mobile keyboard handling
             return React.createElement("div", { className: "flex flex-col lg:flex-row h-full bg-[#111b21] rounded-2xl overflow-hidden border border-white/5 shadow-2xl relative" },
                 React.createElement("div", { className: `${isMobile && view === 'chat' ? 'hidden' : 'flex'} w-full lg:w-[350px] flex-col bg-[#111b21] border-r border-white/10 shrink-0` },
                     React.createElement("div", { className: "p-4 bg-[#202c33] flex items-center justify-between shrink-0" },
@@ -973,7 +968,6 @@
                             React.createElement("div", null, React.createElement("h4", { className: "font-semibold text-white text-sm leading-tight" }, activeContact.name), React.createElement("p", { className: "text-[9px] text-success" }, activeContact.is_online ? "online" : "offline"))
                         ),
                         
-                        // // MODIFY: Message list container uses flex-1 min-h-0 to scroll correctly independently of input bar
                         React.createElement("div", { 
                             ref: chatContainerRef, 
                             onScroll: handleScroll,
@@ -1019,7 +1013,6 @@
                             }, "Copy SQL Code")
                         ),
 
-                        // // MODIFY: Chat bar fixed to bottom via flex layout with safe-bottom padding
                         React.createElement("div", { className: "p-2 sm:p-3 bg-[#202c33] flex items-center gap-2 shrink-0 z-30 safe-bottom border-t border-white/5" },
                             React.createElement("input", { type: "file", ref: fileInputRef, onChange: handleFileSelect, onClick: (e) => e.target.value = null, className: "hidden", accept: "image/*,application/pdf" }),
                             React.createElement("button", { 
@@ -1199,8 +1192,8 @@
                 React.createElement(Icon, null), React.createElement("span", { className: "text-sm tracking-tight" }, label)
             );
 
-            // // MODIFY: Layout wrapper updated to ensure flex-1 overflow hidden and h-full for chat mode
-            return React.createElement("div", { className: "flex flex-col lg:flex-row h-full bg-primary text-slate-200 overflow-hidden" },
+            // FIXED: Removed h-full and overflow-hidden, added min-h-screen
+            return React.createElement("div", { className: "flex flex-col lg:flex-row min-h-screen bg-primary text-slate-200" },
                 // Mobile Header
                 React.createElement("header", { className: "lg:hidden bg-brandNav p-4 flex justify-between items-center border-b border-white/5 z-30 shrink-0 h-16" },
                     React.createElement("div", { className: "flex items-center gap-2" }, React.createElement(Icons.Rocket, null), React.createElement("h1", { className: "text-xl font-black text-accent tracking-tighter" }, "TRACKER")),
@@ -1234,11 +1227,11 @@
                 ),
 
                 // Main Content Area
-                React.createElement("main", { className: "flex-1 overflow-hidden relative z-10 custom-scrollbar bg-primary flex flex-col min-h-0" },
-                    // // MODIFY: For chat, ensure the wrapper takes full dynamic height and stays unpadded for sticky input
+                // FIXED: Removed overflow-hidden and min-h-0
+                React.createElement("main", { className: "flex-1 relative z-10 custom-scrollbar bg-primary flex flex-col" },
                     React.createElement("div", { 
                         className: `
-                            max-w-7xl mx-auto w-full flex-1 min-h-0
+                            max-w-7xl mx-auto w-full flex-1
                             ${section === 'chat' 
                                 ? 'h-full !p-0 flex flex-col overflow-hidden' 
                                 : 'p-4 lg:p-8 overflow-y-auto'
