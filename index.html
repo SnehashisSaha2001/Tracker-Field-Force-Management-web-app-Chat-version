@@ -77,8 +77,16 @@
 
         /* Map Styling */
         .leaflet-container { background: #1e293b; font-family: 'Inter', sans-serif; }
-        .map-tiles-inverted { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(85%); }
-        .leaflet-marker-icon, .leaflet-popup, .leaflet-tooltip, .leaflet-pane { filter: invert(0%) !important; }
+        
+        /* Inverts standard map tiles to dark mode */
+        .map-tiles-inverted { 
+            filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(85%); 
+        }
+        
+        /* Ensures markers, popups, and controls are NOT inverted (normal colors) */
+        .leaflet-marker-icon, .leaflet-popup, .leaflet-tooltip, .leaflet-pane, .leaflet-control-container, .leaflet-bar {
+            filter: invert(0%) !important; 
+        }
 
         /* Custom Scrollbar for Webkit */
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -168,6 +176,7 @@
 </head>
 <body>
     <div id="root"></div>
+    <!-- Leaflet Dependencies -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
 
@@ -228,6 +237,7 @@
             PaperClip: () => React.createElement("svg", { className: "w-5 h-5", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" }, React.createElement("path", { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" })),
             Download: () => React.createElement("svg", { className: "w-4 h-4", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" }, React.createElement("path", { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" })),
             Refresh: () => React.createElement("svg", { className: "w-4 h-4", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" }, React.createElement("path", { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" })),
+            Layers: () => React.createElement("svg", { className: "w-5 h-5", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" }, React.createElement("path", { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M12 2L2 7l10 5 10-5-10-5zm0 9l2.5-1.25L12 8.5l-2.5 1.25L12 11zm0 2.5l-5-2.5-5 2.5L12 22l10-8.5-5-2.5-5 2.5z" })),
         };
 
         const Modal = ({ isOpen, onClose, title, children }) => {
@@ -243,7 +253,170 @@
             );
         };
 
-        // --- COMPONENTS ---
+        // --- UPDATED COMPONENT: MAP WITH CUSTOM SATELLITE BUTTON ---
+        const MapComponent = ({ lat, lng, pathCoordinates = [], currentAddress, active }) => {
+            const mapRef = useRef(null);
+            const mapInstance = useRef(null);
+            const markerRef = useRef(null);
+            const polylineRef = useRef(null);
+            const darkLayerRef = useRef(null);
+            const satelliteLayerRef = useRef(null);
+            const satelliteLabelsRef = useRef(null);
+            
+            const [viewMode, setViewMode] = useState('dark'); // 'dark' or 'satellite'
+
+            // 1. Initialize Map
+            useEffect(() => {
+                if (!mapRef.current || mapInstance.current) return;
+
+                const map = L.map(mapRef.current, {
+                    zoomControl: false,
+                    attributionControl: false
+                }).setView([lat || 20.5937, lng || 78.9629], 13);
+
+                // A. Define Layers
+                // Dark Mode (Filtered OSM) - Matches the App's Dark Theme
+                const darkLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    className: 'map-tiles-inverted' // Uses CSS filter to invert colors
+                });
+
+                // Satellite View (High Quality Esri Imagery)
+                const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                    maxZoom: 19
+                });
+                
+                // Satellite Labels (Overlay to make places readable on satellite)
+                const satelliteLabels = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+                    maxZoom: 19,
+                    pane: 'markerPane' // Ensures labels sit on top of imagery
+                });
+
+                // B. Store Refs
+                darkLayerRef.current = darkLayer;
+                satelliteLayerRef.current = satelliteLayer;
+                satelliteLabelsRef.current = satelliteLabels;
+
+                // C. Add Default Layer
+                darkLayer.addTo(map);
+                
+                // Add Zoom Controls
+                L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+                // Save instance
+                mapInstance.current = map;
+
+                // Cleanup on unmount
+                return () => {
+                    if (mapInstance.current) {
+                        mapInstance.current.remove();
+                        mapInstance.current = null;
+                    }
+                };
+            }, []);
+
+            // 2. Handle Layer Switching (The Logic for the Button)
+            useEffect(() => {
+                if (!mapInstance.current || !darkLayerRef.current) return;
+                const map = mapInstance.current;
+
+                // Simple logic: Remove one, add the other
+                if (viewMode === 'dark') {
+                    if (map.hasLayer(satelliteLayerRef.current)) map.removeLayer(satelliteLayerRef.current);
+                    if (map.hasLayer(satelliteLabelsRef.current)) map.removeLayer(satelliteLabelsRef.current);
+                    if (!map.hasLayer(darkLayerRef.current)) map.addLayer(darkLayerRef.current);
+                } else {
+                    if (map.hasLayer(darkLayerRef.current)) map.removeLayer(darkLayerRef.current);
+                    if (!map.hasLayer(satelliteLayerRef.current)) map.addLayer(satelliteLayerRef.current);
+                    if (!map.hasLayer(satelliteLabelsRef.current)) map.addLayer(satelliteLabelsRef.current);
+                }
+            }, [viewMode]);
+
+            // 3. Handle Dynamic Updates (Location, Path)
+            useEffect(() => {
+                if (!mapInstance.current) return;
+                
+                // Fix map rendering
+                const timeoutId = setTimeout(() => {
+                    mapInstance.current.invalidateSize();
+                }, 100);
+
+                const map = mapInstance.current;
+
+                // Update Marker
+                if (lat && lng) {
+                    const position = [lat, lng];
+                    
+                    const popupHtml = `
+                        <div style="font-family: 'Inter', sans-serif; font-size: 11px; text-align: center; color: #1e293b; min-width: 120px;">
+                            <div style="font-weight: 800; color: #00d1ff; margin-bottom: 2px;">LIVE POSITION</div>
+                            <div style="font-weight: 600; margin-bottom: 2px; color: #334155;">${currentAddress || 'Locating...'}</div>
+                            <div style="font-family: monospace; font-size: 10px; color: #64748b;">${lat.toFixed(5)}, ${lng.toFixed(5)}</div>
+                        </div>
+                    `;
+
+                    if (markerRef.current) {
+                        markerRef.current.setLatLng(position).setPopupContent(popupHtml);
+                        // Smooth fly-to animation
+                        if (active) {
+                            map.flyTo(position, 16, { duration: 1.5 });
+                        }
+                    } else {
+                        markerRef.current = L.marker(position).addTo(map).bindPopup(popupHtml);
+                        if (active) map.flyTo(position, 16, { duration: 1.5 });
+                    }
+                }
+
+                // Update Path (Polyline)
+                if (pathCoordinates && pathCoordinates.length > 0) {
+                    const latLngs = pathCoordinates.map(p => [p.lat, p.lng]);
+                    
+                    if (polylineRef.current) {
+                        polylineRef.current.setLatLngs(latLngs);
+                    } else {
+                        polylineRef.current = L.polyline(latLngs, {
+                            color: '#00d1ff', // Brand Accent Color
+                            weight: 4,
+                            opacity: 0.9,
+                            lineCap: 'round',
+                            lineJoin: 'round'
+                        }).addTo(map);
+                    }
+                    
+                    // Fit map bounds
+                    map.fitBounds(latLngs, { padding: [50, 50], maxZoom: 16 });
+                } else if (polylineRef.current) {
+                    map.removeLayer(polylineRef.current);
+                    polylineRef.current = null;
+                }
+
+                return () => clearTimeout(timeoutId);
+            }, [lat, lng, pathCoordinates, currentAddress, active]);
+
+            // Toggle Function
+            const toggleMapMode = () => {
+                setViewMode(prev => prev === 'dark' ? 'satellite' : 'dark');
+            };
+
+            return React.createElement("div", { className: "w-full h-[40vh] lg:h-[500px] rounded-2xl overflow-hidden shadow-inner border border-tertiary relative z-0 bg-secondary" },
+                React.createElement("div", { ref: mapRef, className: "w-full h-full z-0" }),
+                
+                // --- CUSTOM SATELLITE BUTTON ---
+                React.createElement("button", {
+                    onClick: toggleMapMode,
+                    className: `absolute top-4 right-4 z-[500] flex items-center gap-2 px-4 py-2.5 rounded-full font-bold text-xs uppercase tracking-wider shadow-xl transition-all duration-300 border backdrop-blur-md ${
+                        viewMode === 'dark' 
+                        ? 'bg-primary/80 border-white/10 text-white hover:bg-primary hover:border-accent/50' 
+                        : 'bg-brandMain/80 border-white/10 text-white hover:bg-brandMain hover:border-accent/50'
+                    }`,
+                    title: "Switch to Satellite View"
+                }, 
+                    viewMode === 'dark' 
+                    ? React.createElement(React.Fragment, null, React.createElement(Icons.Map, { className: "w-4 h-4" }), "Satellite View") 
+                    : React.createElement(React.Fragment, null, React.createElement(Icons.Layers, { className: "w-4 h-4" }), "Map View")
+                )
+            );
+        };
 
         const TaskReplies = ({ taskId, user, allEmployees }) => {
             const [replies, setReplies] = useState([]);
@@ -322,48 +495,6 @@
                 React.createElement("div", { className: "space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar p-1" }, loading && replies.length === 0 ? React.createElement("p", { className: "text-center text-xs text-gray-500 py-4" }, "Loading...") : replies.length === 0 ? React.createElement("p", { className: "text-center text-xs text-gray-500 py-4" }, "No replies.") : replies.map(r => { const sender = allEmployees.find(e => e.user_id === r.sender_id); const isMe = r.sender_id === user.user_id; return React.createElement("div", { key: r.id, className: `flex flex-col ${isMe ? 'items-end' : 'items-start'}` }, React.createElement("div", { className: `max-w-[90%] p-3 rounded-2xl ${isMe ? 'bg-accent/10 border border-accent/20' : 'bg-primary/50 border border-tertiary'}` }, React.createElement("p", { className: "text-[10px] font-bold text-accent mb-1" }, sender?.name || r.sender_id), r.file_url && React.createElement("div", { className: "mb-2" }, r.file_type === 'image' ? React.createElement("img", { src: r.file_url, className: "rounded-lg max-h-40 w-auto border border-white/5 shadow-md", alt: "Attachment" }) : React.createElement("a", { href: r.file_url, target: "_blank", rel: "noopener noreferrer", className: "flex items-center gap-2 bg-black/30 p-2 rounded-lg text-xs text-white hover:bg-black/50 transition-colors" }, React.createElement(Icons.PaperClip, null), React.createElement("span", { className: "truncate max-w-[120px]" }, r.file_type === 'pdf' ? 'PDF Document' : 'Excel Sheet'), React.createElement(Icons.Download, null))), r.message && React.createElement("p", { className: "text-sm text-gray-200 leading-relaxed whitespace-pre-wrap" }, r.message), React.createElement("p", { className: "text-[8px] text-gray-500 mt-2 text-right" }, new Date(r.created_at).toLocaleString([], { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' })))); }), React.createElement("div", { ref: scrollRef })),
                 React.createElement("form", { onSubmit: handleSend, className: "bg-primary/40 p-3 rounded-2xl border border-tertiary space-y-3" }, React.createElement("textarea", { value: replyText, onChange: e => setReplyText(e.target.value), className: "modern-input text-sm min-h-[80px] resize-none", placeholder: "Type here..." }), React.createElement("div", { className: "flex items-center gap-2" }, React.createElement("div", { className: "flex-1 relative" }, React.createElement("input", { type: "file", ref: fileInputRef, onChange: handleFileChange, className: "hidden" }), React.createElement("button", { type: "button", onClick: () => fileInputRef.current?.click(), className: `w-full flex items-center justify-center gap-2 p-2.5 rounded-xl border border-dashed transition-all text-xs font-bold ${selectedFile ? 'border-accent text-accent bg-accent/5' : 'border-tertiary text-gray-500 hover:text-gray-300 hover:border-gray-500'}` }, React.createElement(Icons.PaperClip, null), selectedFile ? selectedFile.name : 'Attach File')), React.createElement("button", { type: "submit", disabled: sending || (!replyText.trim() && !selectedFile), className: "bg-accent hover:bg-accentHover disabled:opacity-50 text-brandNav font-black px-6 py-2.5 rounded-xl text-sm transition-all shadow-lg flex items-center gap-2" }, sending ? '...' : React.createElement(Icons.Send, null), "Send")), React.createElement("p", { className: "text-[9px] text-gray-600 text-center" }, "Allowed: Image, PDF, Excel only"))
             );
-        };
-
-        const MapComponent = ({ lat, lng, pathCoordinates = [], currentAddress, active }) => {
-            const mapRef = useRef(null);
-            const mapInstance = useRef(null);
-            const marker = useRef(null);
-            const polyline = useRef(null);
-            const resizeTimeout = useRef(null);
-
-            useEffect(() => {
-                if (!mapRef.current || mapInstance.current) return;
-                mapInstance.current = L.map(mapRef.current, { zoomControl: false, attributionControl: false }).setView([lat || 20.5937, lng || 78.9629], 13);
-                const darkLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { className: 'map-tiles-inverted', maxZoom: 19 });
-                const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}');
-                const satelliteLabels = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { pane: 'markerPane' });
-                const satelliteGroup = L.layerGroup([satelliteLayer, satelliteLabels]);
-                L.control.layers({ "Dark Mode": darkLayer, "Satellite": satelliteGroup }, null, { position: 'topright' }).addTo(mapInstance.current);
-                darkLayer.addTo(mapInstance.current);
-                L.control.zoom({ position: 'bottomright' }).addTo(mapInstance.current);
-                const handleResize = () => { if (mapInstance.current) mapInstance.current.invalidateSize(); };
-                window.addEventListener('resize', handleResize);
-                setTimeout(() => mapInstance.current?.invalidateSize(), 100);
-                return () => { window.removeEventListener('resize', handleResize); if (mapInstance.current) { mapInstance.current.remove(); mapInstance.current = null; } };
-            }, []);
-
-            useEffect(() => {
-                if (!mapInstance.current) return;
-                clearTimeout(resizeTimeout.current);
-                resizeTimeout.current = setTimeout(() => { mapInstance.current?.invalidateSize(); }, 200);
-                if (lat && lng) {
-                    mapInstance.current.flyTo([lat, lng], 16);
-                    const popupHtml = `<div class="text-xs p-1 font-sans"><strong class="text-accent">Live Position</strong><br/>${currentAddress || 'Locating...'}<br/><span class="text-gray-500 font-mono">${lat.toFixed(5)}, ${lng.toFixed(5)}</span></div>`;
-                    if (marker.current) { marker.current.setLatLng([lat, lng]).setPopupContent(popupHtml); } else { marker.current = L.marker([lat, lng]).addTo(mapInstance.current).bindPopup(popupHtml); }
-                }
-                if (pathCoordinates.length > 0) {
-                    const latLngs = pathCoordinates.map(p => [p.lat, p.lng]);
-                    if (polyline.current) { polyline.current.setLatLngs(latLngs); } else { polyline.current = L.polyline(latLngs, { color: '#00d1ff', weight: 4 }).addTo(mapInstance.current); }
-                    mapInstance.current.fitBounds(latLngs, { padding: [50, 50] });
-                }
-            }, [lat, lng, pathCoordinates, currentAddress, active]);
-
-            return React.createElement("div", { ref: mapRef, className: "w-full h-[40vh] lg:h-[500px] rounded-2xl overflow-hidden shadow-inner border border-tertiary relative z-0 bg-secondary" });
         };
 
         const Login = ({ onLogin }) => {
